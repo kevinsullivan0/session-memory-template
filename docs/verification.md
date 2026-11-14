@@ -1,0 +1,11 @@
+# Verification and limits
+
+Run `npm ci`, `npm run build`, then `npm test` from a fresh checkout. Tests use temporary directories and clearly synthetic data. They do not read recordings, contact paid APIs or require credentials.
+
+Coverage includes audio-only computer capture, missing-audio cleanup, microphone permission errors, first-byte probing, ambiguous start reconciliation, independent input ownership, duplicate starts, release/restart generations, invalid/stale renewals, queue write failure, offline upload retention, mismatched receipts, repeated uploads, byte conflicts, late-upload review, explicit transcript corrections, adapter failure/expired-job recovery, source search/exports, source-linked human review, disk reopen, Host/Origin rejection and the actual HTTP setup route.
+
+The optional ffmpeg test uses a generated tone and a fake local model placeholder. It verifies WAV normalization, command arguments, text return and temporary cleanup using an injected command runner. It does **not** load a speech-recognition model. The synthetic example is not speech recognition either.
+
+Browser acceptance checks can be replayed without microphone access: run Synthetic recovery test; observe one queued segment; reopen in another tab; retry uploads; observe the matching server receipt and held source; approve local processing; attach a synthetic transcript; repeat capture; add a note; search for its text; propose and explicitly confirm a source-linked candidate.
+
+Known limits: a browser crash may lose the current unsealed minute; IndexedDB may be evicted; reopening a different origin/profile does not recover the same queue; computer-audio permissions and availability depend on browser/OS; browser audio duration parsing can reject some WebM imports; there is a brief restart boundary between independent segments; this is not sample-continuous professional recording. Automatic speech quality and live microphone/computer capture need manual device verification. Search is bounded substring search, not semantic retrieval. Photo OCR, automated memory extraction, multi-user hosting and background transcription scheduling are not implemented.
