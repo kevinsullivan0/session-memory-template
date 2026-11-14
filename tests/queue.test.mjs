@@ -50,3 +50,21 @@ test("quota failure is exposed before any upload acknowledgment", async () => {
     /Quota/,
   );
 });
+
+test('a deferred upload cannot delay the next recording after durable local sealing',async()=>{
+ const {sealAndContinue}=await import('../lib/capture-queue.mjs');const store=adapter(),events=[];
+ let resolveUpload;const upload=new Promise(resolve=>{resolveUpload=resolve;});
+ const row=await sealAndContinue(store,{id:'next',blob:new Blob(['audio']),meta:{}},{
+  continueRecording:()=>{assert.equal(store.rows.size,1);events.push('recording');},
+  flush:async()=>{events.push('upload');await upload;}
+ });
+ assert.equal(row.id,'next');assert.deepEqual(events,['recording','upload']);assert.equal(store.rows.size,1);resolveUpload();
+});
+test('a local persistence failure prevents the next recording and upload',async()=>{
+ const {sealAndContinue}=await import('../lib/capture-queue.mjs');
+ await assert.rejects(sealAndContinue({put:async()=>{throw Error('disk full');}},{blob:new Blob(['audio']),meta:{}},{continueRecording:()=>assert.fail('must not record'),flush:()=>assert.fail('must not upload')}),/disk full/);
+});
+test('recovery downloads preserve audio and photo file extensions',async()=>{
+ const {mediaExtension}=await import('../lib/capture-queue.mjs');
+ for(const [mime,extension] of [['audio/wav','wav'],['audio/mp4','mp4'],['audio/webm;codecs=opus','webm'],['image/jpeg','jpg'],['image/png','png'],['image/webp','webp']])assert.equal(mediaExtension(mime),extension);
+});

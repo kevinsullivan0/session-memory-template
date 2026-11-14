@@ -113,3 +113,22 @@ test('concurrent transcript corrections accept only one current revision',async 
  const results=await Promise.all(['First correction.','Second correction.'].map(text=>call('transcripts/attach',{id:'fixture',revision:1,text})));
  assert.deepEqual(results.map(r=>r.status).sort(),[200,409]);
 });
+
+test('a corrected source cannot confirm an older candidate; stale proposals can still be rejected',async t=>{
+ const {call,start,upload}=setup(t);await upload(await start());
+ const candidate=await call('candidates/propose',{type:'DECISION_CANDIDATE',text:'Proposed from original text.',sourceId:'fixture'});
+ await call('transcripts/attach',{id:'fixture',revision:1,text:'Corrected source text.'});
+ const body={id:candidate.body.id,version:1};
+ assert.equal((await call('decisions/confirm',body)).status,409);
+ assert.equal((await call('candidates/reject',body)).status,200);
+ assert.equal((await call('state')).body.records.filter(r=>r.kind==='decision').length,0);
+});
+test('explicit retry reclaims an expired fourth attempt but cannot reset a live worker',async t=>{
+ const {call,start,upload,storage}=setup(t);await upload(await start());
+ storage.sql.prepare("UPDATE jobs SET status='running',attempts=4,lease_until=?").run(Date.now()+100000);
+ await call('jobs/retry',{});assert.equal(storage.sql.prepare('SELECT attempts FROM jobs').get().attempts,4);
+ storage.sql.prepare('UPDATE jobs SET lease_until=0').run();
+ assert.equal(await processNext(storage,()=>assert.fail('must wait for retry')),null);
+ await call('jobs/retry',{});
+ assert.equal((await processNext(storage,async()=> 'Recovered fourth attempt.')).status,'done');
+});

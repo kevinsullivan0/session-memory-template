@@ -4,6 +4,8 @@ import {
   openQueue,
   saveSegment,
   flushSegments,
+  sealAndContinue,
+  mediaExtension,
 } from "../lib/capture-queue.mjs";
 
 import { acquireAudio, primeRecording, requestRecorder } from "../lib/capture-input.mjs";
@@ -79,6 +81,7 @@ export default function Desk() {
   };
   async function upload(row: Any) {
     const r = await fetch("/api/evidence", {
+      signal: AbortSignal.timeout(15000),
       method: "POST",
       headers: {
         "Content-Type": row.blob.type || row.meta.mime,
@@ -355,36 +358,28 @@ export default function Desk() {
         media.onstop = async () => {
           const blob = new Blob(chunks, { type: media.mimeType });
           try {
-            if (blob.size)
-              await saveSegment(captureQueue, {
-                id: uuid(),
-                blob,
-                meta: {
-                  ...claim,
-                  sequence: seq,
-                  kind: "audio",
-                  duration: Math.min(125, (performance.now() - startedMonotonic) / 1000),
-                  capturedAt: started,
-                },
-              });
-            await updateQueue();
-            if (!holdRef.current) await flush();
-            else
-              setNotice(
-                "Synthetic segment saved on this device. Reload to verify recovery, then choose Retry uploads.",
-              );
-          } catch (e: Any) {
+            const continueRecording = async () => {
+              await updateQueue();
+              if (synthetic) {
+                active.current = false;
+                setRecording(false);
+                audio.getTracks().forEach(t=>t.stop());
+                context?.close();
+                api("recorder/release",owned).catch(()=>{});
+                setCaptureStatus("Synthetic segment sealed");
+              } else if(active.current && performance.now()<deadline.current) next();
+            };
+            if(blob.size) await sealAndContinue(captureQueue,{
+              id:uuid(),blob,meta:{...claim,sequence:seq,kind:"audio",
+                duration:Math.min(125,(performance.now()-startedMonotonic)/1000),capturedAt:started}
+            },{continueRecording,flush:holdRef.current ? undefined : flush,
+              onUploadError:(e:Any)=>setError(`Audio remains saved locally. ${e.message}`)});
+            else await continueRecording();
+            if(holdRef.current)setNotice("Segment saved on this device. Reopen the app to verify recovery, or choose Retry uploads.");
+          } catch(e:Any) {
             stopLocal();
             setError(`Local save failed; recording stopped. ${e.message}`);
           }
-          if (synthetic) {
-            active.current = false;
-            setRecording(false);
-            audio.getTracks().forEach((t) => t.stop());
-            context?.close();
-            api("recorder/release", owned).catch(() => {});
-            setCaptureStatus("Synthetic segment sealed");
-          } else if (active.current && performance.now() < deadline.current) next();
         };
         if (!initial) media.start();
         if (sample) sample.start();
@@ -506,7 +501,7 @@ export default function Desk() {
   }
   function download(row: Any) {
     const url=URL.createObjectURL(row.blob), link=document.createElement('a');
-    link.href=url;link.download=`segment-${row.id}.${row.blob.type.includes('mp4')?'mp4':row.blob.type.includes('ogg')?'ogg':'webm'}`;link.click();
+    link.href=url;link.download=`segment-${row.id}.${mediaExtension(row.blob.type)}`;link.click();
     setTimeout(()=>URL.revokeObjectURL(url),1000);
   }
   if(!data)return <main><h1>Session memory</h1><p role="status">{error||'Opening local workspace…'}</p><button onClick={refresh}>Retry</button></main>;
